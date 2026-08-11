@@ -106,8 +106,11 @@ Drop a `.fyaiignore` file (gitignore syntax) anywhere under the scanned director
 ### Basic Usage
 
 ```bash
-fyai            # combine everything in the current directory into fyai.txt
-fyai --help     # show all options
+fyai                                                                # combine everything in the current directory into fyai.txt
+fyai --help                                                         # show all options
+
+fyai man > /usr/local/share/man/man1/fyai.1                        # print a roff-formatted man page to a file
+fyai completions zsh > /usr/local/share/zsh/site-functions/_fyai   # print a zsh completion script to a file
 ```
 
 ### Examples
