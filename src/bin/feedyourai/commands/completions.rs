@@ -12,8 +12,12 @@ use super::{Cli, Command};
 pub fn handle_completions_subcommand(cli: &Cli) -> Result<bool> {
     if let Some(Command::Completions { shell }) = &cli.command {
         let mut cmd = Cli::command();
-        let name = cmd.get_name().to_string();
-        clap_complete::generate(*shell, &mut cmd, name, &mut std::io::stdout());
+        clap_complete::generate(
+            *shell,
+            &mut cmd,
+            env!("CARGO_BIN_NAME"),
+            &mut std::io::stdout(),
+        );
         return Ok(true);
     }
     Ok(false)
