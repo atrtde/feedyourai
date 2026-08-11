@@ -92,6 +92,10 @@ where
         return Ok(());
     }
 
+    if commands::completions::handle_completions_subcommand(&cli)? {
+        return Ok(());
+    }
+
     if commands::init::handle_init_subcommand(&cli)? {
         return Ok(());
     }

@@ -192,6 +192,21 @@ fn man_subcommand_prints_roff_man_page() {
 }
 
 #[test]
+fn completions_subcommand_prints_shell_script() {
+    fyai()
+        .args(["completions", "zsh"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("#compdef fyai"));
+
+    fyai()
+        .args(["completions", "bash"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("_fyai()"));
+}
+
+#[test]
 fn tree_only_skips_file_contents() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("secret.txt"), "top-secret-body").unwrap();
