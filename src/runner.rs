@@ -13,11 +13,13 @@ use crate::config::Config;
 use crate::error::{FyaiError, Result};
 use crate::scanner::{ScanStats, scan};
 
-/// Path of the temporary clone directory currently being populated by
-/// [`clone_repository`], if any. Tracked so a Ctrl-C handler installed by
-/// the binary (via [`cleanup_active_clone`]) can remove it: a signal
-/// handler drives the process to exit outside of normal control flow, so
-/// the `TempDir` guard's own `Drop` impl never gets a chance to run.
+/// Root of the temporary directory backing the current `--repo` run, if
+/// any, from the moment it's created until [`run_git`] returns (spanning
+/// both the clone and the subsequent scan). Tracked so a Ctrl-C handler
+/// installed by the binary (via [`cleanup_active_clone`]) can remove it: a
+/// signal handler drives the process to exit outside of normal control
+/// flow, so the `TempDir` guard's own `Drop` impl never gets a chance to
+/// run.
 static ACTIVE_CLONE_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 /// Removes the temporary clone directory tracked in [`ACTIVE_CLONE_PATH`],
@@ -73,7 +75,14 @@ pub fn run_git(
     commit: Option<&str>,
     config: Config,
 ) -> Result<ScanStats> {
-    let (temp_dir, clone_path) = clone_repository(repo_url, branch, commit)?;
+    let temp_dir = tempfile::tempdir()?;
+
+    if let Ok(mut guard) = ACTIVE_CLONE_PATH.lock() {
+        *guard = Some(temp_dir.path().to_path_buf());
+    }
+    let _active_path_guard = ActiveClonePathGuard;
+
+    let clone_path = clone_repository(&temp_dir, repo_url, branch, commit)?;
 
     let mut config = config;
     config.directory = clone_path;
@@ -83,26 +92,21 @@ pub fn run_git(
     result
 }
 
-/// Clones `repo_url` into a fresh temporary directory, optionally checking
-/// out `branch` and/or `commit`.
+/// Clones `repo_url` into `temp_dir`, optionally checking out `branch`
+/// and/or `commit`.
 ///
 /// The clone is shallow (`--depth 1`) unless `commit` is set, since the
 /// target commit may not be reachable from a depth-1 history.
 ///
-/// Returns the [`TempDir`] guard (drop it to delete the clone) alongside the
-/// path to the checked-out repository.
+/// Returns the path to the checked-out repository, a subdirectory of
+/// `temp_dir`.
 fn clone_repository(
+    temp_dir: &TempDir,
     repo_url: &str,
     branch: Option<&str>,
     commit: Option<&str>,
-) -> Result<(TempDir, PathBuf)> {
-    let temp_dir = tempfile::tempdir()?;
+) -> Result<PathBuf> {
     let clone_path = temp_dir.path().join("repo");
-
-    if let Ok(mut guard) = ACTIVE_CLONE_PATH.lock() {
-        *guard = Some(clone_path.clone());
-    }
-    let _active_path_guard = ActiveClonePathGuard;
 
     let mut cmd = Command::new("git");
     cmd.arg("clone");
@@ -139,7 +143,7 @@ fn clone_repository(
         }
     }
 
-    Ok((temp_dir, clone_path))
+    Ok(clone_path)
 }
 
 /// Extracts a human-readable error message from a failed command's output,
