@@ -209,6 +209,16 @@ pub struct Cli {
     )]
     pub quiet: bool,
 
+    /// Prints the run summary as a single line of JSON to stdout instead of
+    /// human-readable text \[default: false\]. Implies the same output
+    /// suppression as `--quiet` for the human-readable lines.
+    #[arg(
+        long = "json",
+        action = ArgAction::SetTrue,
+        help = "Print the run summary as JSON instead of human-readable text [default: false]"
+    )]
+    pub json: bool,
+
     /// Optional subcommand (currently only `init`).
     #[command(subcommand)]
     pub command: Option<Command>,

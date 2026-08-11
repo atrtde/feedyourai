@@ -48,7 +48,7 @@ where
     let file_config = match config::discover_config_file() {
         Some(path) => match config::PartialConfig::from_path(&path) {
             Ok(cfg) => {
-                if !cli.quiet {
+                if !cli.quiet && !cli.json {
                     println!("Loaded config from: {}", path.display());
                 }
                 cfg
@@ -82,7 +82,21 @@ where
     };
 
     if tree_only {
-        if !cli.quiet {
+        if cli.json {
+            let summary = RunSummary {
+                output: output_path.display().to_string(),
+                tree_only: true,
+                total_size: stats.total_size,
+                written_size: None,
+                binary_size: None,
+                size_filtered: None,
+                clipboard: None,
+            };
+            println!(
+                "{}",
+                serde_json::to_string(&summary).wrap_err("failed to serialize JSON summary")?
+            );
+        } else if !cli.quiet {
             println!("Project tree written to {}", output_path.display());
             println!("Total size walked: {}", format_size(stats.total_size));
         }
@@ -92,7 +106,39 @@ where
     let output_contents = std::fs::read_to_string(&output_path)
         .wrap_err_with(|| format!("failed to read output file {}", output_path.display()))?;
 
-    if !cli.quiet {
+    let size_filtered = stats.size_filtered();
+
+    // A clipboard failure that's expected in this environment (CI, headless
+    // Linux) is downgraded to a stderr warning, always shown regardless of
+    // `--quiet`/`--json`, rather than aborting the run.
+    let clipboard_copied = if cli.clipboard {
+        match clipboard::copy_to_clipboard(&output_contents) {
+            Ok(()) => Some(true),
+            Err(err) if clipboard::should_ignore_clipboard_error() => {
+                eprintln!("Warning: clipboard unavailable; skipping copy. {}", err);
+                Some(false)
+            }
+            Err(err) => return Err(err),
+        }
+    } else {
+        None
+    };
+
+    if cli.json {
+        let summary = RunSummary {
+            output: output_path.display().to_string(),
+            tree_only: false,
+            total_size: stats.total_size,
+            written_size: Some(stats.written_size),
+            binary_size: Some(stats.binary_size),
+            size_filtered: Some(size_filtered),
+            clipboard: clipboard_copied,
+        };
+        println!(
+            "{}",
+            serde_json::to_string(&summary).wrap_err("failed to serialize JSON summary")?
+        );
+    } else if !cli.quiet {
         println!("Files combined successfully into {}", output_path.display());
         println!("Total size walked: {}", format_size(stats.total_size));
         println!(
@@ -100,27 +146,28 @@ where
             format_size(stats.written_size)
         );
         println!("  Binary (skipped): {}", format_size(stats.binary_size));
-        let size_filtered = stats.size_filtered();
         if size_filtered > 0 {
             println!("  Skipped by size filter: {}", format_size(size_filtered));
         }
-    }
-
-    if cli.clipboard {
-        match clipboard::copy_to_clipboard(&output_contents) {
-            Ok(()) => {
-                if !cli.quiet {
-                    println!("Output copied to clipboard successfully!");
-                }
-            }
-            Err(err) if clipboard::should_ignore_clipboard_error() => {
-                eprintln!("Warning: clipboard unavailable; skipping copy. {}", err);
-            }
-            Err(err) => return Err(err),
+        if clipboard_copied == Some(true) {
+            println!("Output copied to clipboard successfully!");
         }
     }
 
     Ok(())
+}
+
+/// A single-line JSON run summary, printed to stdout when `--json` is
+/// passed instead of the human-readable status lines.
+#[derive(serde::Serialize)]
+struct RunSummary {
+    output: String,
+    tree_only: bool,
+    total_size: u64,
+    written_size: Option<u64>,
+    binary_size: Option<u64>,
+    size_filtered: Option<u64>,
+    clipboard: Option<bool>,
 }
 
 /// Formats `bytes` as a human-readable size (`"512 B"`, `"1.2 KB"`, `"3.4
