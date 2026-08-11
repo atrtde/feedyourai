@@ -81,7 +81,11 @@ fn json_flag_prints_single_line_json_summary() {
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout).to_string();
     let lines: Vec<&str> = stdout.lines().filter(|l| !l.trim().is_empty()).collect();
-    assert_eq!(lines.len(), 1, "expected exactly one JSON line, got: {stdout:?}");
+    assert_eq!(
+        lines.len(),
+        1,
+        "expected exactly one JSON line, got: {stdout:?}"
+    );
 
     let json: serde_json::Value = serde_json::from_str(lines[0]).expect("valid JSON");
     assert_eq!(json["tree_only"], false);
