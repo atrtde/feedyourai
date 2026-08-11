@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use clap::{CommandFactory, FromArgMatches};
 use color_eyre::eyre::{Result, WrapErr, eyre};
+use colored::Colorize;
 use indicatif::ProgressBar;
 
 use self::commands::Cli;
@@ -23,7 +24,9 @@ mod commands;
 pub(crate) fn run() -> Result<()> {
     install_interrupt_handler();
     let args: Vec<_> = std::env::args_os().collect();
-    install_error_hooks(color_disabled(&args))?;
+    let no_color = color_disabled(&args);
+    colored::control::set_override(!no_color);
+    install_error_hooks(no_color)?;
     execute(args)
 }
 
@@ -38,15 +41,17 @@ pub(crate) fn run() -> Result<()> {
 /// just won't clean up a partial clone.
 fn install_interrupt_handler() {
     let _ = ctrlc::set_handler(|| {
-        eprintln!("\nInterrupted. Cleaning up and exiting...");
+        eprintln!("\n{}", "Interrupted. Cleaning up and exiting...".yellow());
         feedyourai::runner::cleanup_active_clone();
         std::process::exit(130);
     });
 }
 
-/// Whether colored error/panic output should be disabled: an explicit
-/// `--no-color` flag, the `NO_COLOR` convention (<https://no-color.org/>),
-/// or a `dumb` terminal that can't render ANSI escapes.
+/// Whether colored output (both `color_eyre`'s error/panic formatting and
+/// this binary's own status lines via the `colored` crate) should be
+/// disabled: an explicit `--no-color` flag, the `NO_COLOR` convention
+/// (<https://no-color.org/>), a `dumb` terminal that can't render ANSI
+/// escapes, or stdout not being a real terminal at all (e.g. piped/redirected).
 ///
 /// Checked against the raw argument list rather than the parsed [`Cli`],
 /// since the decision has to be made before `color_eyre`'s hooks are
@@ -55,6 +60,7 @@ fn color_disabled<T: AsRef<std::ffi::OsStr>>(args: &[T]) -> bool {
     args.iter().any(|a| a.as_ref() == "--no-color")
         || std::env::var_os("NO_COLOR").is_some()
         || std::env::var("TERM").is_ok_and(|term| term == "dumb")
+        || !std::io::stdout().is_terminal()
 }
 
 /// Installs `color_eyre`'s panic/error hooks, with an uncolored theme when
@@ -106,9 +112,13 @@ where
             }
             Err(e) => {
                 eprintln!(
-                    "Warning: Failed to load config file ({}): {}",
-                    path.display(),
-                    e
+                    "{}",
+                    format!(
+                        "Warning: Failed to load config file ({}): {}",
+                        path.display(),
+                        e
+                    )
+                    .yellow()
                 );
                 config::PartialConfig::default()
             }
@@ -123,15 +133,22 @@ where
     if output_path.exists() && !cli.force {
         if std::io::stdin().is_terminal() {
             eprint!(
-                "Output file {} already exists. Overwrite? [y/N] ",
-                output_path.display()
+                "{}",
+                format!(
+                    "Output file {} already exists. Overwrite? [y/N] ",
+                    output_path.display()
+                )
+                .yellow()
             );
             std::io::stderr().flush().ok();
             let mut answer = String::new();
             std::io::stdin().read_line(&mut answer)?;
             if !answer.trim().eq_ignore_ascii_case("y") {
                 if !cli.quiet {
-                    println!("Aborted: not overwriting {}.", output_path.display());
+                    println!(
+                        "{}",
+                        format!("Aborted: not overwriting {}.", output_path.display()).yellow()
+                    );
                 }
                 return Ok(());
             }
@@ -183,7 +200,10 @@ where
                 serde_json::to_string(&summary).wrap_err("failed to serialize JSON summary")?
             );
         } else if !cli.quiet {
-            println!("Project tree written to {}", output_path.display());
+            println!(
+                "{}",
+                format!("Project tree written to {}", output_path.display()).green()
+            );
             println!("Total size walked: {}", format_size(stats.total_size));
         }
         return Ok(());
@@ -201,7 +221,10 @@ where
         match clipboard::copy_to_clipboard(&output_contents) {
             Ok(()) => Some(true),
             Err(err) if clipboard::should_ignore_clipboard_error() => {
-                eprintln!("Warning: clipboard unavailable; skipping copy. {}", err);
+                eprintln!(
+                    "{}",
+                    format!("Warning: clipboard unavailable; skipping copy. {}", err).yellow()
+                );
                 Some(false)
             }
             Err(err) => return Err(err),
@@ -225,7 +248,10 @@ where
             serde_json::to_string(&summary).wrap_err("failed to serialize JSON summary")?
         );
     } else if !cli.quiet {
-        println!("Files combined successfully into {}", output_path.display());
+        println!(
+            "{}",
+            format!("Files combined successfully into {}", output_path.display()).green()
+        );
         println!("Total size walked: {}", format_size(stats.total_size));
         println!(
             "  Non-binary (written): {}",
@@ -236,7 +262,7 @@ where
             println!("  Skipped by size filter: {}", format_size(size_filtered));
         }
         if clipboard_copied == Some(true) {
-            println!("Output copied to clipboard successfully!");
+            println!("{}", "Output copied to clipboard successfully!".green());
         }
     }
 

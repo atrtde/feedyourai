@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use super::{Cli, Command};
 use color_eyre::eyre::{OptionExt, Result, bail};
+use colored::Colorize;
 
 /// If `cli` carries an `init` subcommand, writes a starter `fyai.toml` and
 /// returns `Ok(true)`; otherwise returns `Ok(false)` so the caller proceeds
@@ -60,7 +61,10 @@ human = false
 
         std::fs::write(&path, template)?;
         if !cli.quiet {
-            println!("Template config file written to {}", display_path);
+            println!(
+                "{}",
+                format!("Template config file written to {}", display_path).green()
+            );
         }
         return Ok(true);
     }
