@@ -5,12 +5,43 @@
 
 use std::path::PathBuf;
 use std::process::{self, Command};
+use std::sync::Mutex;
 
 use tempfile::TempDir;
 
 use crate::config::Config;
 use crate::error::{FyaiError, Result};
 use crate::scanner::{ScanStats, scan};
+
+/// Path of the temporary clone directory currently being populated by
+/// [`clone_repository`], if any. Tracked so a Ctrl-C handler installed by
+/// the binary (via [`cleanup_active_clone`]) can remove it: a signal
+/// handler drives the process to exit outside of normal control flow, so
+/// the `TempDir` guard's own `Drop` impl never gets a chance to run.
+static ACTIVE_CLONE_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// Removes the temporary clone directory tracked in [`ACTIVE_CLONE_PATH`],
+/// if a clone is currently in progress. Safe to call from a Ctrl-C handler;
+/// a no-op if no clone is active.
+pub fn cleanup_active_clone() {
+    if let Ok(guard) = ACTIVE_CLONE_PATH.lock()
+        && let Some(path) = guard.as_ref()
+    {
+        let _ = std::fs::remove_dir_all(path);
+    }
+}
+
+/// Clears [`ACTIVE_CLONE_PATH`] on drop, regardless of which return path
+/// [`clone_repository`] takes.
+struct ActiveClonePathGuard;
+
+impl Drop for ActiveClonePathGuard {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = ACTIVE_CLONE_PATH.lock() {
+            *guard = None;
+        }
+    }
+}
 
 /// Combines files from a local directory as described by `config`.
 ///
@@ -67,6 +98,11 @@ fn clone_repository(
 ) -> Result<(TempDir, PathBuf)> {
     let temp_dir = tempfile::tempdir()?;
     let clone_path = temp_dir.path().join("repo");
+
+    if let Ok(mut guard) = ACTIVE_CLONE_PATH.lock() {
+        *guard = Some(clone_path.clone());
+    }
+    let _active_path_guard = ActiveClonePathGuard;
 
     let mut cmd = Command::new("git");
     cmd.arg("clone");
@@ -129,6 +165,7 @@ fn command_error_details(output: &process::Output) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::fs;
     use std::path::Path;
 
@@ -207,6 +244,43 @@ mod tests {
         fs::read_to_string(path).expect("read output file")
     }
 
+    // ---- cleanup_active_clone ----
+    //
+    // Tagged `#[serial(active_clone)]`, shared with the `run_git_*` tests
+    // below: all of them read or write the same `ACTIVE_CLONE_PATH`
+    // static, so they can't run concurrently without racing each other.
+
+    #[test]
+    #[serial(active_clone)]
+    fn cleanup_active_clone_removes_tracked_directory() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let clone_path = dir.path().join("repo");
+        fs::create_dir_all(&clone_path).expect("create_dir_all");
+        fs::write(clone_path.join("f.txt"), "x").expect("write f.txt");
+
+        {
+            let mut guard = ACTIVE_CLONE_PATH.lock().expect("lock");
+            *guard = Some(clone_path.clone());
+        }
+
+        cleanup_active_clone();
+
+        assert!(!clone_path.exists());
+        let mut guard = ACTIVE_CLONE_PATH.lock().expect("lock");
+        *guard = None;
+    }
+
+    #[test]
+    #[serial(active_clone)]
+    fn cleanup_active_clone_is_noop_when_nothing_active() {
+        {
+            let mut guard = ACTIVE_CLONE_PATH.lock().expect("lock");
+            *guard = None;
+        }
+
+        cleanup_active_clone();
+    }
+
     // ---- run_local ----
 
     #[test]
@@ -269,6 +343,7 @@ mod tests {
     // ---- run_git: success paths ----
 
     #[test]
+    #[serial(active_clone)]
     fn run_git_clones_and_scans_default_branch() {
         let repo_dir = init_git_repo();
         let repo_path = repo_dir.path().to_str().expect("utf8 path").to_string();
@@ -296,6 +371,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(active_clone)]
     fn run_git_with_branch_checks_out_branch_content() {
         let repo_dir = init_git_repo();
         let repo_path = repo_dir.path();
@@ -335,6 +411,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(active_clone)]
     fn run_git_with_commit_pins_to_specific_commit() {
         let repo_dir = init_git_repo();
         let repo_path = repo_dir.path();
@@ -378,6 +455,7 @@ mod tests {
     // ---- run_git: failure paths ----
 
     #[test]
+    #[serial(active_clone)]
     fn run_git_invalid_repo_url_returns_git_error() {
         let out_dir = tempfile::tempdir().expect("tempdir");
         let output_path = out_dir.path().join("combined.txt");
@@ -398,6 +476,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(active_clone)]
     fn run_git_invalid_commit_returns_git_error() {
         let repo_dir = init_git_repo();
         let repo_path = repo_dir.path().to_str().expect("utf8 path").to_string();
@@ -422,6 +501,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(active_clone)]
     fn run_git_propagates_scan_io_error() {
         let repo_dir = init_git_repo();
         let repo_path = repo_dir.path().to_str().expect("utf8 path").to_string();

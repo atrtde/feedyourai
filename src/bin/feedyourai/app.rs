@@ -17,12 +17,31 @@ mod clipboard;
 /// Argument parsing and the `init` subcommand.
 mod commands;
 
-/// Runs the CLI end to end: installs `color_eyre`'s error/panic hooks, then
-/// parses the real process arguments and delegates to [`execute`].
+/// Runs the CLI end to end: installs the Ctrl-C and `color_eyre`
+/// error/panic hooks, then parses the real process arguments and delegates
+/// to [`execute`].
 pub(crate) fn run() -> Result<()> {
+    install_interrupt_handler();
     let args: Vec<_> = std::env::args_os().collect();
     install_error_hooks(color_disabled(&args))?;
     execute(args)
+}
+
+/// Installs a Ctrl-C handler that cleans up an in-progress `--repo` clone's
+/// temporary directory before exiting. A signal handler drives the process
+/// out through `std::process::exit` rather than a normal `return`, so
+/// `TempDir`'s own `Drop`-based cleanup never runs on interrupt without
+/// this.
+///
+/// A failure to install (e.g. a handler already registered) is ignored:
+/// the process still exits promptly on Ctrl-C via the platform default, it
+/// just won't clean up a partial clone.
+fn install_interrupt_handler() {
+    let _ = ctrlc::set_handler(|| {
+        eprintln!("\nInterrupted. Cleaning up and exiting...");
+        feedyourai::runner::cleanup_active_clone();
+        std::process::exit(130);
+    });
 }
 
 /// Whether colored error/panic output should be disabled: an explicit
