@@ -231,6 +231,17 @@ pub struct Cli {
     )]
     pub no_color: bool,
 
+    /// Overwrites an existing output file without prompting \[default:
+    /// false\]. Required when stdin isn't a terminal, since there's no one
+    /// to prompt.
+    #[arg(
+        short = 'f',
+        long = "force",
+        action = ArgAction::SetTrue,
+        help = "Overwrite an existing output file without prompting [default: false]"
+    )]
+    pub force: bool,
+
     /// Optional subcommand (currently `init` and `man`).
     #[command(subcommand)]
     pub command: Option<Command>,

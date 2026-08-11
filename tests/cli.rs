@@ -134,6 +134,50 @@ fn no_color_env_var_disables_ansi_in_error_output() {
 }
 
 #[test]
+fn existing_output_without_force_fails_noninteractively() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("a.txt"), "hello").unwrap();
+    let output = dir.path().join("out.txt");
+    fs::write(&output, "old contents").unwrap();
+
+    fyai()
+        .arg("-i")
+        .arg(dir.path())
+        .arg("-o")
+        .arg(&output)
+        // A piped, empty stdin is never a terminal, exercising the same
+        // "no one to prompt" path as a real non-interactive script.
+        .write_stdin("")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("already exists"))
+        .stderr(predicate::str::contains("--force"));
+
+    assert_eq!(fs::read_to_string(&output).unwrap(), "old contents");
+}
+
+#[test]
+fn force_flag_overwrites_existing_output_without_prompting() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("a.txt"), "hello").unwrap();
+    let output = dir.path().join("out.txt");
+    fs::write(&output, "old contents").unwrap();
+
+    fyai()
+        .arg("-i")
+        .arg(dir.path())
+        .arg("-o")
+        .arg(&output)
+        .arg("--force")
+        .assert()
+        .success();
+
+    let contents = fs::read_to_string(&output).unwrap();
+    assert!(contents.contains("hello"));
+    assert!(!contents.contains("old contents"));
+}
+
+#[test]
 fn man_subcommand_prints_roff_man_page() {
     fyai()
         .arg("man")

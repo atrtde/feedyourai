@@ -2,11 +2,11 @@
 //! alias. Included by both `main.rs` files via `#[path]`, so this same
 //! source compiles twice, once per binary target.
 
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 use std::time::Duration;
 
 use clap::{CommandFactory, FromArgMatches};
-use color_eyre::eyre::{Result, WrapErr};
+use color_eyre::eyre::{Result, WrapErr, eyre};
 use indicatif::ProgressBar;
 
 use self::commands::Cli;
@@ -119,6 +119,29 @@ where
     let config = config::merge_config(file_config, config::env_config(), cli_config);
     let output_path = config.output.clone();
     let tree_only = config.tree_only;
+
+    if output_path.exists() && !cli.force {
+        if std::io::stdin().is_terminal() {
+            eprint!(
+                "Output file {} already exists. Overwrite? [y/N] ",
+                output_path.display()
+            );
+            std::io::stderr().flush().ok();
+            let mut answer = String::new();
+            std::io::stdin().read_line(&mut answer)?;
+            if !answer.trim().eq_ignore_ascii_case("y") {
+                if !cli.quiet {
+                    println!("Aborted: not overwriting {}.", output_path.display());
+                }
+                return Ok(());
+            }
+        } else {
+            return Err(eyre!(
+                "output file {} already exists; pass --force/-f to overwrite in non-interactive mode",
+                output_path.display()
+            ));
+        }
+    }
 
     let show_progress = !cli.quiet && !cli.json && std::io::stdout().is_terminal();
     let _spinner = show_progress.then(|| {
