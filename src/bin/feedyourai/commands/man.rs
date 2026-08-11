@@ -10,7 +10,14 @@ use super::{Cli, Command};
 /// caller proceeds with a normal combine run.
 pub fn handle_man_subcommand(cli: &Cli) -> Result<bool> {
     if let Some(Command::Man) = &cli.command {
-        clap_mangen::Man::new(Cli::command())
+        let mut cmd = Cli::command();
+        // `CARGO_BIN_NAME` resolves per binary target at compile time
+        // (unlike `Cli`'s fixed `#[command(name = "fyai")]`), so the
+        // `feedyourai` binary's man page is titled `feedyourai` and
+        // `fyai`'s under its own name.
+        cmd.set_bin_name(env!("CARGO_BIN_NAME"));
+        cmd = cmd.name(env!("CARGO_BIN_NAME"));
+        clap_mangen::Man::new(cmd)
             .render(&mut std::io::stdout())
             .wrap_err("failed to render man page")?;
         return Ok(true);
