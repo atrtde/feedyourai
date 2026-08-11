@@ -82,6 +82,10 @@ where
     let matches = Cli::command().get_matches_from(args);
     let cli = Cli::from_arg_matches(&matches).wrap_err("failed to parse arguments")?;
 
+    if commands::man::handle_man_subcommand(&cli)? {
+        return Ok(());
+    }
+
     if commands::init::handle_init_subcommand(&cli)? {
         return Ok(());
     }

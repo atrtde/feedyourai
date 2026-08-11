@@ -9,6 +9,8 @@ use feedyourai::config::PartialConfig;
 
 /// The `init` subcommand: writes a starter `fyai.toml`.
 pub mod init;
+/// The `man` subcommand: prints a roff-formatted man page.
+pub mod man;
 
 /// Top-level command-line arguments.
 #[derive(Parser, Debug)]
@@ -16,7 +18,7 @@ pub mod init;
     name = "fyai",
     version = env!("CARGO_PKG_VERSION"),
     about = "A tool to combine text files for LLM processing with flexible filtering options.\n\nEXAMPLE:\n  fyai -i ./src --include-ext rs,toml -o combined.txt\n\nRun `fyai --help` for the full flag reference, config precedence, and more examples.",
-    long_about = "A tool to combine text files for LLM processing with flexible filtering options.\n\nEXAMPLES:\n  fyai -i ./src --include-ext rs,toml -o combined.txt\n  fyai --repo https://github.com/owner/repo.git --tree-only\n  fyai --json -q -o out.txt\n  fyai init\n\nCONFIG FILE SUPPORT:\n  - You can specify options in a config file (TOML format).\n  - Local config: ./fyai.toml (used if present in current directory)\n  - Global config: system config directory (used if no local config found).\n    Honors $XDG_CONFIG_HOME (any platform, if set to an absolute path),\n    else the platform default. Run `fyai init --global` to see the exact path.\n  - Precedence: CLI flags > FYAI_* environment variables > config file > built-in defaults.\n  - You can also drop a .fyaiignore file (gitignore syntax) to exclude paths.\n  - See README for details and examples.\n\nSUPPORT:\n  Report issues at https://github.com/alexandretrotel/feedyourai/issues"
+    long_about = "A tool to combine text files for LLM processing with flexible filtering options.\n\nEXAMPLES:\n  fyai -i ./src --include-ext rs,toml -o combined.txt\n  fyai --repo https://github.com/owner/repo.git --tree-only\n  fyai --json -q -o out.txt\n  fyai init\n\nCONFIG FILE SUPPORT:\n  - You can specify options in a config file (TOML format).\n  - Local config: ./fyai.toml (used if present in current directory)\n  - Global config: system config directory (used if no local config found).\n    Honors $XDG_CONFIG_HOME (any platform, if set to an absolute path),\n    else the platform default. Run `fyai init --global` to see the exact path.\n  - Precedence: CLI flags > FYAI_* environment variables > config file > built-in defaults.\n  - You can also drop a .fyaiignore file (gitignore syntax) to exclude paths.\n  - See README for details and examples.\n\nMAN PAGE:\n  Run `fyai man` to print a roff-formatted man page.\n\nSUPPORT:\n  Report issues at https://github.com/alexandretrotel/feedyourai/issues"
 )]
 pub struct Cli {
     /// Sets the input directory.
@@ -229,7 +231,7 @@ pub struct Cli {
     )]
     pub no_color: bool,
 
-    /// Optional subcommand (currently only `init`).
+    /// Optional subcommand (currently `init` and `man`).
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -252,6 +254,11 @@ pub enum Command {
         #[arg(long = "force", action = ArgAction::SetTrue, help = "Overwrite existing config file if present")]
         force: bool,
     },
+
+    /// Prints a roff-formatted man page to stdout.
+    ///
+    /// e.g. `fyai man > /usr/local/share/man/man1/fyai.1`
+    Man,
 }
 
 /// Converts parsed `clap` matches into a [`PartialConfig`], leaving a field

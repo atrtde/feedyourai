@@ -134,6 +134,16 @@ fn no_color_env_var_disables_ansi_in_error_output() {
 }
 
 #[test]
+fn man_subcommand_prints_roff_man_page() {
+    fyai()
+        .arg("man")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(".TH fyai 1"))
+        .stdout(predicate::str::contains(".SH NAME"));
+}
+
+#[test]
 fn tree_only_skips_file_contents() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("secret.txt"), "top-secret-body").unwrap();
