@@ -1,7 +1,5 @@
 //! Implementation of the `man` subcommand.
 
-use std::io::Write;
-
 use clap::CommandFactory;
 use color_eyre::eyre::{Result, WrapErr};
 
@@ -12,13 +10,9 @@ use super::{Cli, Command};
 /// caller proceeds with a normal combine run.
 pub fn handle_man_subcommand(cli: &Cli) -> Result<bool> {
     if let Some(Command::Man) = &cli.command {
-        let man = clap_mangen::Man::new(Cli::command());
-        let mut buffer = Vec::new();
-        man.render(&mut buffer)
+        clap_mangen::Man::new(Cli::command())
+            .render(&mut std::io::stdout())
             .wrap_err("failed to render man page")?;
-        std::io::stdout()
-            .write_all(&buffer)
-            .wrap_err("failed to write man page to stdout")?;
         return Ok(true);
     }
     Ok(false)
