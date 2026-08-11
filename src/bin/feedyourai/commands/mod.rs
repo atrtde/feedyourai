@@ -5,7 +5,7 @@
 use clap::{ArgAction, Parser, Subcommand, parser::ValueSource};
 
 use color_eyre::eyre::{Result, eyre};
-use feedyourai::config::PartialConfig;
+use feedyourai::config::{PartialConfig, parse_comma_list};
 
 /// The `completions` subcommand: prints a shell completion script.
 pub mod completions;
@@ -296,67 +296,41 @@ pub fn config_from_matches(matches: clap::ArgMatches) -> Result<PartialConfig> {
     let directory = explicit_string(&matches, "input");
     let output = explicit_string(&matches, "output");
 
-    let include_dirs = match matches.try_get_one::<String>("include_dirs") {
-        Ok(opt) => opt.map(|dirs| {
-            dirs.split(',')
-                .map(|s| s.trim().to_lowercase())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-        }),
-        Err(_) => None,
-    };
+    let include_dirs = matches
+        .try_get_one::<String>("include_dirs")
+        .ok()
+        .flatten()
+        .map(|dirs| parse_comma_list(dirs));
 
-    let exclude_dirs = match matches.try_get_one::<String>("exclude_dirs") {
-        Ok(opt) => opt.map(|dirs| {
-            dirs.split(',')
-                .map(|s| s.trim().to_lowercase())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-        }),
-        Err(_) => None,
-    };
+    let exclude_dirs = matches
+        .try_get_one::<String>("exclude_dirs")
+        .ok()
+        .flatten()
+        .map(|dirs| parse_comma_list(dirs));
 
-    let include_ext = match matches.try_get_one::<String>("include_ext") {
-        Ok(opt) => opt.map(|ext| {
-            ext.split(',')
-                .map(|s| s.trim().to_lowercase())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-        }),
-        Err(_) => None,
-    };
+    let include_ext = matches
+        .try_get_one::<String>("include_ext")
+        .ok()
+        .flatten()
+        .map(|ext| parse_comma_list(ext));
 
-    let exclude_ext = match matches.try_get_one::<String>("exclude_ext") {
-        Ok(opt) => opt.map(|ext| {
-            ext.split(',')
-                .map(|s| s.trim().to_lowercase())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-        }),
-        Err(_) => None,
-    };
+    let exclude_ext = matches
+        .try_get_one::<String>("exclude_ext")
+        .ok()
+        .flatten()
+        .map(|ext| parse_comma_list(ext));
 
-    let include_files = match matches.try_get_one::<String>("include_files") {
-        Ok(opt) => opt.map(|files| {
-            files
-                .split(',')
-                .map(|s| s.trim().to_lowercase())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-        }),
-        Err(_) => None,
-    };
+    let include_files = matches
+        .try_get_one::<String>("include_files")
+        .ok()
+        .flatten()
+        .map(|files| parse_comma_list(files));
 
-    let exclude_files = match matches.try_get_one::<String>("exclude_files") {
-        Ok(opt) => opt.map(|files| {
-            files
-                .split(',')
-                .map(|s| s.trim().to_lowercase())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-        }),
-        Err(_) => None,
-    };
+    let exclude_files = matches
+        .try_get_one::<String>("exclude_files")
+        .ok()
+        .flatten()
+        .map(|files| parse_comma_list(files));
 
     let min_size = match matches.try_get_one::<u64>("min_size") {
         Ok(Some(value)) => Some(*value),

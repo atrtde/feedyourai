@@ -203,12 +203,18 @@ fn env_string(key: &str) -> Option<String> {
 }
 
 fn env_list(key: &str) -> Option<Vec<String>> {
-    env_string(key).map(|v| {
-        v.split(',')
-            .map(|s| s.trim().to_lowercase())
-            .filter(|s| !s.is_empty())
-            .collect()
-    })
+    env_string(key).map(|v| parse_comma_list(&v))
+}
+
+/// Splits a comma-separated list into trimmed, lower-cased entries, dropping
+/// any that are empty — the format shared by list-valued CLI flags (e.g.
+/// `--include-dirs`) and their `FYAI_*` environment-variable counterparts.
+pub fn parse_comma_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 fn env_bool(key: &str) -> Option<bool> {
