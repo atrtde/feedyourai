@@ -2,10 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 2026-08-11 - 3.3.0
 
-Planned
-- Tracking CLI improvements against the [clig.dev](https://clig.dev/) command-line interface guidelines. See the tracking PR for the task list.
+CLI improvements against the [clig.dev](https://clig.dev/) command-line interface guidelines.
+
+Added
+- `-q`/`--quiet` flag to suppress non-essential status output (config-loaded notice, size breakdown, success/clipboard messages); errors and warnings still print to stderr.
+- `--json` flag to print a single-line JSON run summary (output path, size breakdown, clipboard outcome) to stdout instead of human-readable text.
+- `--no-color` flag to disable colored error/panic output; also honored via `NO_COLOR` and `TERM=dumb`.
+- A progress spinner during `--repo` clones and local scans, shown when stdout is a real terminal and neither `--quiet` nor `--json` was passed.
+- `FYAI_*` environment variables (`FYAI_OUTPUT`, `FYAI_MIN_SIZE`, `FYAI_HIDDEN`, ...) as a config layer between CLI flags and `fyai.toml`.
+- Ctrl-C now cleans up an in-progress `--repo` clone's temporary directory before exiting, instead of leaving it behind.
+- `man` subcommand: prints a roff-formatted man page to stdout, e.g. `fyai man > /usr/local/share/man/man1/fyai.1`.
+- `-f`/`--force` flag; without it, overwriting an existing output file prompts interactively, and fails with guidance in non-interactive contexts.
+
+Changed
+- `-h`/`--help` now leads with a short description, one example, and a support/issues link; `--help` carries the full reference with more examples.
+- **Breaking:** `config::merge_config` now takes three `PartialConfig`s (`file`, `env`, `cli`) instead of two, to fold in the new `FYAI_*` environment-variable layer while staying a pure function.
 
 ## 2026-08-07 - 3.2.0
 

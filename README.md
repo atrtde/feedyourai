@@ -19,6 +19,16 @@ A command-line tool to combine files from a directory into a single file for LLM
 - Preserves file boundaries with headers showing filename and size
 - Customizable input directory and output file
 
+## CLI Behavior
+
+- `-q`/`--quiet` suppresses non-essential status output (config-loaded notice, size breakdown, success/clipboard messages); errors and warnings always still print to stderr.
+- `--json` prints a single-line JSON run summary to stdout instead of human-readable text, for scripting.
+- `--no-color` disables colored error/panic output; also honored via the `NO_COLOR` environment variable or `TERM=dumb`.
+- A progress spinner is shown during `--repo` clones and local scans when stdout is a real terminal and neither `--quiet` nor `--json` was passed.
+- Overwriting an existing output file prompts for confirmation interactively; pass `-f`/`--force` to skip the prompt, which is required in non-interactive contexts (scripts, CI).
+- Ctrl-C cleans up an in-progress `--repo` clone's temporary directory before exiting.
+- `fyai man` prints a roff-formatted man page to stdout, e.g. `fyai man > /usr/local/share/man/man1/fyai.1`.
+
 ## Installation
 
 ### Install via Cargo
@@ -43,13 +53,39 @@ You can specify options in a config file (TOML format):
 
 - **Local config:** `./fyai.toml` (used if present in current directory)
 - **Global config:** System config directory, used if no local config found — `$XDG_CONFIG_HOME` if set to an absolute path (any platform), otherwise the platform default (e.g. `~/.config` on Linux, `~/Library/Application Support` on macOS)
-- **Precedence:** Local config overrides global config. CLI options override both config files.
+- **Precedence:** CLI flags > `FYAI_*` environment variables > local config > global config > built-in defaults.
 
 To see the exact global config path on your system, run:
 
 ```bash
 fyai init --global
 ```
+
+### Environment Variables
+
+Every config option can also be set via a `FYAI_*` environment variable, taking precedence over `fyai.toml` but not over CLI flags:
+
+| Variable | Corresponds to |
+| --- | --- |
+| `FYAI_DIRECTORY` | `-i`/`--input` |
+| `FYAI_OUTPUT` | `-o`/`--output` |
+| `FYAI_INCLUDE_DIRS` | `--include-dirs` |
+| `FYAI_EXCLUDE_DIRS` | `--exclude-dirs` |
+| `FYAI_INCLUDE_EXT` | `--include-ext` |
+| `FYAI_EXCLUDE_EXT` | `--exclude-ext` |
+| `FYAI_INCLUDE_FILES` | `--include-files` |
+| `FYAI_EXCLUDE_FILES` | `--exclude-files` |
+| `FYAI_MIN_SIZE` | `-n`/`--min-size` |
+| `FYAI_MAX_SIZE` | `-m`/`--max-size` |
+| `FYAI_HIDDEN` | `--no-hidden` (inverse; `true`/`false`) |
+| `FYAI_GITIGNORE` | `--no-gitignore` (inverse; `true`/`false`) |
+| `FYAI_IGNORE_FILES` | `--no-ignore-files` (inverse; `true`/`false`) |
+| `FYAI_GIT_GLOBAL` | `--no-git-global` (inverse; `true`/`false`) |
+| `FYAI_FOLLOW_LINKS` | `--follow-links` (`true`/`false`) |
+| `FYAI_TREE_ONLY` | `--tree-only` (`true`/`false`) |
+| `FYAI_HUMAN` | `--human` (`true`/`false`) |
+
+List-valued variables use the same comma-separated format as their CLI counterparts (e.g. `FYAI_INCLUDE_EXT=rs,toml`).
 
 #### Example `fyai.toml`
 
@@ -102,6 +138,11 @@ fyai --help     # show all options
 | Remote repo, specific branch             | `fyai --repo https://github.com/owner/repo.git --repo-branch main`    |
 | Remote repo, specific commit             | `fyai --repo https://github.com/owner/repo.git --repo-commit 1234abcd` |
 | Generate a config template               | `fyai init`                                                            |
+| Suppress status output                   | `fyai -q`                                                              |
+| Machine-readable run summary             | `fyai --json`                                                         |
+| Disable colored error output             | `fyai --no-color`                                                     |
+| Overwrite an existing output without prompting | `fyai -o out.txt --force`                                       |
+| Print a roff man page                    | `fyai man > /usr/local/share/man/man1/fyai.1`                         |
 
 ## Output Format
 
