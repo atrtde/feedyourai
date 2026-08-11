@@ -47,11 +47,15 @@ fn install_interrupt_handler() {
     });
 }
 
-/// Whether colored output (both `color_eyre`'s error/panic formatting and
-/// this binary's own status lines via the `colored` crate) should be
-/// disabled: an explicit `--no-color` flag, the `NO_COLOR` convention
+/// Whether colored output (both `color_eyre`'s error/panic formatting, which
+/// writes to stderr, and this binary's own status lines via the `colored`
+/// crate, which write to both stdout and stderr) should be disabled: an
+/// explicit `--no-color` flag, the `NO_COLOR` convention
 /// (<https://no-color.org/>), a `dumb` terminal that can't render ANSI
-/// escapes, or stdout not being a real terminal at all (e.g. piped/redirected).
+/// escapes, or neither stdout nor stderr being a real terminal (e.g. both
+/// piped/redirected). Checking both streams, rather than stdout alone, means
+/// redirecting just one of them (e.g. `fyai -o out.txt > run.log` with
+/// stderr still attached to a terminal) doesn't strip color from the other.
 ///
 /// Checked against the raw argument list rather than the parsed [`Cli`],
 /// since the decision has to be made before `color_eyre`'s hooks are
@@ -60,7 +64,7 @@ fn color_disabled<T: AsRef<std::ffi::OsStr>>(args: &[T]) -> bool {
     args.iter().any(|a| a.as_ref() == "--no-color")
         || std::env::var_os("NO_COLOR").is_some()
         || std::env::var("TERM").is_ok_and(|term| term == "dumb")
-        || !std::io::stdout().is_terminal()
+        || (!std::io::stdout().is_terminal() && !std::io::stderr().is_terminal())
 }
 
 /// Installs `color_eyre`'s panic/error hooks, with an uncolored theme when
