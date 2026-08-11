@@ -5,7 +5,7 @@
 use std::io::{IsTerminal, Write};
 use std::time::Duration;
 
-use clap::{CommandFactory, FromArgMatches};
+use clap::{ColorChoice, CommandFactory, FromArgMatches};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use colored::Colorize;
 use indicatif::ProgressBar;
@@ -89,7 +89,17 @@ where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
-    let matches = Cli::command().get_matches_from(args);
+    let args: Vec<std::ffi::OsString> = args.into_iter().map(Into::into).collect();
+
+    // clap's own automatic colorization (used for its `--help`/usage/error
+    // text) already honors `NO_COLOR`/`TERM=dumb`/non-terminal output on its
+    // own, but has no way to know about this binary's own `--no-color` flag
+    // unless told explicitly.
+    let mut command = Cli::command();
+    if args.iter().any(|a| a.to_str() == Some("--no-color")) {
+        command = command.color(ColorChoice::Never);
+    }
+    let matches = command.get_matches_from(args);
     let cli = Cli::from_arg_matches(&matches).wrap_err("failed to parse arguments")?;
 
     if commands::man::handle_man_subcommand(&cli)? {
