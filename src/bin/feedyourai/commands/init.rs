@@ -59,7 +59,9 @@ human = false
 "#;
 
         std::fs::write(&path, template)?;
-        println!("Template config file written to {}", display_path);
+        if !cli.quiet {
+            println!("Template config file written to {}", display_path);
+        }
         return Ok(true);
     }
     Ok(false)

@@ -198,6 +198,17 @@ pub struct Cli {
     #[arg(short = 't', long = "test", action = ArgAction::SetTrue, help = "Run in test mode")]
     pub test: bool,
 
+    /// Suppresses non-essential status output (config-loaded notice, size
+    /// breakdown, success messages) \[default: false\]. Errors and warnings
+    /// still print to stderr.
+    #[arg(
+        short = 'q',
+        long = "quiet",
+        action = ArgAction::SetTrue,
+        help = "Suppress non-essential status output [default: false]"
+    )]
+    pub quiet: bool,
+
     /// Optional subcommand (currently only `init`).
     #[command(subcommand)]
     pub command: Option<Command>,

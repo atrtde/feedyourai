@@ -46,6 +46,25 @@ fn combines_files_and_writes_output() {
 }
 
 #[test]
+fn quiet_suppresses_status_output() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("a.txt"), "hello").unwrap();
+    let output = dir.path().join("out.txt");
+
+    fyai()
+        .arg("-i")
+        .arg(dir.path())
+        .arg("-o")
+        .arg(&output)
+        .arg("-q")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+
+    assert!(output.exists());
+}
+
+#[test]
 fn tree_only_skips_file_contents() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("secret.txt"), "top-secret-body").unwrap();

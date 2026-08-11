@@ -48,7 +48,9 @@ where
     let file_config = match config::discover_config_file() {
         Some(path) => match config::PartialConfig::from_path(&path) {
             Ok(cfg) => {
-                println!("Loaded config from: {}", path.display());
+                if !cli.quiet {
+                    println!("Loaded config from: {}", path.display());
+                }
                 cfg
             }
             Err(e) => {
@@ -80,29 +82,37 @@ where
     };
 
     if tree_only {
-        println!("Project tree written to {}", output_path.display());
-        println!("Total size walked: {}", format_size(stats.total_size));
+        if !cli.quiet {
+            println!("Project tree written to {}", output_path.display());
+            println!("Total size walked: {}", format_size(stats.total_size));
+        }
         return Ok(());
     }
 
     let output_contents = std::fs::read_to_string(&output_path)
         .wrap_err_with(|| format!("failed to read output file {}", output_path.display()))?;
 
-    println!("Files combined successfully into {}", output_path.display());
-    println!("Total size walked: {}", format_size(stats.total_size));
-    println!(
-        "  Non-binary (written): {}",
-        format_size(stats.written_size)
-    );
-    println!("  Binary (skipped): {}", format_size(stats.binary_size));
-    let size_filtered = stats.size_filtered();
-    if size_filtered > 0 {
-        println!("  Skipped by size filter: {}", format_size(size_filtered));
+    if !cli.quiet {
+        println!("Files combined successfully into {}", output_path.display());
+        println!("Total size walked: {}", format_size(stats.total_size));
+        println!(
+            "  Non-binary (written): {}",
+            format_size(stats.written_size)
+        );
+        println!("  Binary (skipped): {}", format_size(stats.binary_size));
+        let size_filtered = stats.size_filtered();
+        if size_filtered > 0 {
+            println!("  Skipped by size filter: {}", format_size(size_filtered));
+        }
     }
 
     if cli.clipboard {
         match clipboard::copy_to_clipboard(&output_contents) {
-            Ok(()) => println!("Output copied to clipboard successfully!"),
+            Ok(()) => {
+                if !cli.quiet {
+                    println!("Output copied to clipboard successfully!");
+                }
+            }
             Err(err) if clipboard::should_ignore_clipboard_error() => {
                 eprintln!("Warning: clipboard unavailable; skipping copy. {}", err);
             }
