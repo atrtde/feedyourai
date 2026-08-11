@@ -2,8 +2,12 @@
 //! alias. Included by both `main.rs` files via `#[path]`, so this same
 //! source compiles twice, once per binary target.
 
+use std::io::IsTerminal;
+use std::time::Duration;
+
 use clap::{CommandFactory, FromArgMatches};
 use color_eyre::eyre::{Result, WrapErr};
+use indicatif::ProgressBar;
 
 use self::commands::Cli;
 use feedyourai::{config, run_git, run_local};
@@ -93,6 +97,18 @@ where
     let output_path = config.output.clone();
     let tree_only = config.tree_only;
 
+    let show_progress = !cli.quiet && !cli.json && std::io::stdout().is_terminal();
+    let _spinner = show_progress.then(|| {
+        let pb = ProgressBar::new_spinner();
+        pb.enable_steady_tick(Duration::from_millis(100));
+        pb.set_message(if repo_url.is_some() {
+            "Cloning repository..."
+        } else {
+            "Scanning directory..."
+        });
+        SpinnerGuard(pb)
+    });
+
     let stats = if let Some(repo_url) = repo_url {
         run_git(
             &repo_url,
@@ -179,6 +195,16 @@ where
     }
 
     Ok(())
+}
+
+/// Clears its spinner on drop, so it disappears whether the run it's
+/// tracking succeeds or bails out early through `?`.
+struct SpinnerGuard(ProgressBar);
+
+impl Drop for SpinnerGuard {
+    fn drop(&mut self) {
+        self.0.finish_and_clear();
+    }
 }
 
 /// A single-line JSON run summary, printed to stdout when `--json` is
