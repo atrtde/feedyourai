@@ -19,16 +19,6 @@ A command-line tool to combine files from a directory into a single file for LLM
 - Preserves file boundaries with headers showing filename and size
 - Customizable input directory and output file
 
-## CLI Behavior
-
-- `-q`/`--quiet` suppresses non-essential status output (config-loaded notice, size breakdown, success/clipboard messages); errors and warnings always still print to stderr.
-- `--json` prints a single-line JSON run summary to stdout instead of human-readable text, for scripting.
-- `--no-color` disables colored error/panic output; also honored via the `NO_COLOR` environment variable or `TERM=dumb`.
-- A progress spinner is shown during `--repo` clones and local scans when stdout is a real terminal and neither `--quiet` nor `--json` was passed.
-- Overwriting an existing output file prompts for confirmation interactively; pass `-f`/`--force` to skip the prompt, which is required in non-interactive contexts (scripts, CI).
-- Ctrl-C cleans up an in-progress `--repo` clone's temporary directory before exiting.
-- `fyai man` prints a roff-formatted man page to stdout, e.g. `fyai man > /usr/local/share/man/man1/fyai.1`.
-
 ## Installation
 
 ### Install via Cargo
