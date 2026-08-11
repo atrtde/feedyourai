@@ -1,6 +1,7 @@
 [package]
 name = "feedyourai"
 version = "3.3.0"
+default-run = "feedyourai"
 edition = "2024"
 description = "A tool to combine text files for LLM processing with flexible filtering options."
 authors = ["Alexandre Trotel"]
