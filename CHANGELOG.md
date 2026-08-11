@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+Planned
+- Tracking CLI improvements against the [clig.dev](https://clig.dev/) command-line interface guidelines. See the tracking PR for the task list.
+
 ## 2026-08-07 - 3.2.0
 
 Added
