@@ -90,6 +90,50 @@ fn json_flag_prints_single_line_json_summary() {
 }
 
 #[test]
+fn no_color_flag_disables_ansi_in_error_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("does-not-exist");
+    let output = dir.path().join("out.txt");
+
+    let assert = fyai()
+        .arg("-i")
+        .arg(&missing)
+        .arg("-o")
+        .arg(&output)
+        .arg("--no-color")
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    assert!(
+        !stderr.contains('\u{1b}'),
+        "expected no ANSI escapes in stderr, got: {stderr:?}"
+    );
+}
+
+#[test]
+fn no_color_env_var_disables_ansi_in_error_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("does-not-exist");
+    let output = dir.path().join("out.txt");
+
+    let assert = fyai()
+        .arg("-i")
+        .arg(&missing)
+        .arg("-o")
+        .arg(&output)
+        .env("NO_COLOR", "1")
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    assert!(
+        !stderr.contains('\u{1b}'),
+        "expected no ANSI escapes in stderr, got: {stderr:?}"
+    );
+}
+
+#[test]
 fn tree_only_skips_file_contents() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("secret.txt"), "top-secret-body").unwrap();

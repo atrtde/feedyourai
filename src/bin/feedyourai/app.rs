@@ -16,8 +16,32 @@ mod commands;
 /// Runs the CLI end to end: installs `color_eyre`'s error/panic hooks, then
 /// parses the real process arguments and delegates to [`execute`].
 pub(crate) fn run() -> Result<()> {
-    color_eyre::install()?;
-    execute(std::env::args_os())
+    let args: Vec<_> = std::env::args_os().collect();
+    install_error_hooks(color_disabled(&args))?;
+    execute(args)
+}
+
+/// Whether colored error/panic output should be disabled: an explicit
+/// `--no-color` flag, the `NO_COLOR` convention (<https://no-color.org/>),
+/// or a `dumb` terminal that can't render ANSI escapes.
+///
+/// Checked against the raw argument list rather than the parsed [`Cli`],
+/// since the decision has to be made before `color_eyre`'s hooks are
+/// installed — before any error could be reported through them.
+fn color_disabled<T: AsRef<std::ffi::OsStr>>(args: &[T]) -> bool {
+    args.iter().any(|a| a.as_ref() == "--no-color")
+        || std::env::var_os("NO_COLOR").is_some()
+        || std::env::var("TERM").is_ok_and(|term| term == "dumb")
+}
+
+/// Installs `color_eyre`'s panic/error hooks, with an uncolored theme when
+/// `no_color` is set.
+fn install_error_hooks(no_color: bool) -> Result<()> {
+    let mut builder = color_eyre::config::HookBuilder::default();
+    if no_color {
+        builder = builder.theme(color_eyre::config::Theme::new());
+    }
+    builder.install()
 }
 
 /// Parses `args`, resolves configuration (merging any `fyai.toml` with CLI

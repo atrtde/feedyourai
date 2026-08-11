@@ -219,6 +219,15 @@ pub struct Cli {
     )]
     pub json: bool,
 
+    /// Disables colored error/panic output \[default: false\]. Also honored
+    /// via the `NO_COLOR` environment variable or `TERM=dumb`.
+    #[arg(
+        long = "no-color",
+        action = ArgAction::SetTrue,
+        help = "Disable colored error/panic output [default: false] (also honors NO_COLOR, TERM=dumb)"
+    )]
+    pub no_color: bool,
+
     /// Optional subcommand (currently only `init`).
     #[command(subcommand)]
     pub command: Option<Command>,
