@@ -93,7 +93,7 @@ where
         None => config::PartialConfig::default(),
     };
 
-    let config = config::merge_config(file_config, cli_config);
+    let config = config::merge_config(file_config, config::env_config(), cli_config);
     let output_path = config.output.clone();
     let tree_only = config.tree_only;
 
