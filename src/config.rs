@@ -158,9 +158,103 @@ pub fn system_config_dir() -> Option<PathBuf> {
     dirs::config_dir()
 }
 
-/// Merges two [`PartialConfig`]s into a final [`Config`]: `cli`'s value wins
-/// wherever set, otherwise `file`'s, otherwise the built-in default.
-pub fn merge_config(file: PartialConfig, cli: PartialConfig) -> Config {
+/// Reads `FYAI_*` environment variables into a [`PartialConfig`], mirroring
+/// the corresponding CLI flags: `FYAI_DIRECTORY`, `FYAI_OUTPUT`,
+/// `FYAI_INCLUDE_DIRS`, `FYAI_EXCLUDE_DIRS`, `FYAI_INCLUDE_EXT`,
+/// `FYAI_EXCLUDE_EXT`, `FYAI_INCLUDE_FILES`, `FYAI_EXCLUDE_FILES`,
+/// `FYAI_MIN_SIZE`, `FYAI_MAX_SIZE`, `FYAI_HIDDEN`, `FYAI_GITIGNORE`,
+/// `FYAI_IGNORE_FILES`, `FYAI_GIT_GLOBAL`, `FYAI_FOLLOW_LINKS`,
+/// `FYAI_TREE_ONLY`, `FYAI_HUMAN`.
+///
+/// List-valued variables use the same comma-separated, trimmed,
+/// lower-cased, empty-entry-dropped format as their CLI counterparts.
+/// Boolean variables accept `true`/`false` (case-insensitive); anything
+/// else, like an unset or unparseable variable, is treated as unset.
+///
+/// Reads the real process environment, so pass its result into
+/// [`merge_config`] explicitly rather than having `merge_config` call it
+/// internally — that keeps `merge_config` a pure function of its
+/// arguments, which is what lets its own tests run in parallel without
+/// mutating shared process state.
+pub fn env_config() -> PartialConfig {
+    PartialConfig {
+        directory: env_string("FYAI_DIRECTORY"),
+        output: env_string("FYAI_OUTPUT"),
+        include_dirs: env_list("FYAI_INCLUDE_DIRS"),
+        exclude_dirs: env_list("FYAI_EXCLUDE_DIRS"),
+        include_ext: env_list("FYAI_INCLUDE_EXT"),
+        exclude_ext: env_list("FYAI_EXCLUDE_EXT"),
+        include_files: env_list("FYAI_INCLUDE_FILES"),
+        exclude_files: env_list("FYAI_EXCLUDE_FILES"),
+        min_size: env_u64("FYAI_MIN_SIZE"),
+        max_size: env_u64("FYAI_MAX_SIZE"),
+        hidden: env_bool("FYAI_HIDDEN"),
+        gitignore: env_bool("FYAI_GITIGNORE"),
+        ignore_files: env_bool("FYAI_IGNORE_FILES"),
+        git_global: env_bool("FYAI_GIT_GLOBAL"),
+        follow_links: env_bool("FYAI_FOLLOW_LINKS"),
+        tree_only: env_bool("FYAI_TREE_ONLY"),
+        human: env_bool("FYAI_HUMAN"),
+    }
+}
+
+fn env_string(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|v| !v.is_empty())
+}
+
+fn env_list(key: &str) -> Option<Vec<String>> {
+    env_string(key).map(|v| parse_comma_list(&v))
+}
+
+/// Splits a comma-separated list into trimmed, lower-cased entries, dropping
+/// any that are empty — the format shared by list-valued CLI flags (e.g.
+/// `--include-dirs`) and their `FYAI_*` environment-variable counterparts.
+pub fn parse_comma_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn env_bool(key: &str) -> Option<bool> {
+    env_string(key).and_then(|v| v.to_lowercase().parse::<bool>().ok())
+}
+
+fn env_u64(key: &str) -> Option<u64> {
+    env_string(key).and_then(|v| v.parse::<u64>().ok())
+}
+
+/// Fills any field left unset in `primary` with the corresponding field
+/// from `fallback`.
+fn or_partial(primary: PartialConfig, fallback: PartialConfig) -> PartialConfig {
+    PartialConfig {
+        directory: primary.directory.or(fallback.directory),
+        output: primary.output.or(fallback.output),
+        include_dirs: primary.include_dirs.or(fallback.include_dirs),
+        exclude_dirs: primary.exclude_dirs.or(fallback.exclude_dirs),
+        include_ext: primary.include_ext.or(fallback.include_ext),
+        exclude_ext: primary.exclude_ext.or(fallback.exclude_ext),
+        include_files: primary.include_files.or(fallback.include_files),
+        exclude_files: primary.exclude_files.or(fallback.exclude_files),
+        min_size: primary.min_size.or(fallback.min_size),
+        max_size: primary.max_size.or(fallback.max_size),
+        hidden: primary.hidden.or(fallback.hidden),
+        gitignore: primary.gitignore.or(fallback.gitignore),
+        ignore_files: primary.ignore_files.or(fallback.ignore_files),
+        git_global: primary.git_global.or(fallback.git_global),
+        follow_links: primary.follow_links.or(fallback.follow_links),
+        tree_only: primary.tree_only.or(fallback.tree_only),
+        human: primary.human.or(fallback.human),
+    }
+}
+
+/// Merges three [`PartialConfig`]s into a final [`Config`]: `cli`'s value
+/// wins wherever set, then `env`'s (see [`env_config`]), then `file`'s,
+/// otherwise the built-in default.
+pub fn merge_config(file: PartialConfig, env: PartialConfig, cli: PartialConfig) -> Config {
+    let cli = or_partial(cli, env);
+
     let directory = cli
         .directory
         .or(file.directory)
@@ -404,6 +498,47 @@ mod tests {
         assert_eq!(system_config_dir(), dirs::config_dir());
     }
 
+    // ---- env_config ----
+
+    #[test]
+    #[serial(env)]
+    fn env_config_reads_string_and_list_and_numeric_and_bool_vars() {
+        let _output_guard = EnvVarGuard::new("FYAI_OUTPUT");
+        let _dirs_guard = EnvVarGuard::new("FYAI_INCLUDE_DIRS");
+        let _min_guard = EnvVarGuard::new("FYAI_MIN_SIZE");
+        let _hidden_guard = EnvVarGuard::new("FYAI_HIDDEN");
+        unsafe {
+            std::env::set_var("FYAI_OUTPUT", "env-out.txt");
+            std::env::set_var("FYAI_INCLUDE_DIRS", "Src, ,Test,");
+            std::env::set_var("FYAI_MIN_SIZE", "1024");
+            std::env::set_var("FYAI_HIDDEN", "FALSE");
+        }
+
+        let env = env_config();
+        assert_eq!(env.output, Some("env-out.txt".to_string()));
+        assert_eq!(
+            env.include_dirs,
+            Some(vec!["src".to_string(), "test".to_string()])
+        );
+        assert_eq!(env.min_size, Some(1024));
+        assert_eq!(env.hidden, Some(false));
+    }
+
+    #[test]
+    #[serial(env)]
+    fn env_config_ignores_unset_and_unparseable_vars() {
+        let _output_guard = EnvVarGuard::new("FYAI_OUTPUT");
+        let _min_guard = EnvVarGuard::new("FYAI_MIN_SIZE");
+        unsafe {
+            std::env::remove_var("FYAI_OUTPUT");
+            std::env::set_var("FYAI_MIN_SIZE", "not-a-number");
+        }
+
+        let env = env_config();
+        assert_eq!(env.output, None);
+        assert_eq!(env.min_size, None);
+    }
+
     // ---- merge_config ----
 
     fn empty_partial() -> PartialConfig {
@@ -411,8 +546,36 @@ mod tests {
     }
 
     #[test]
+    fn merge_config_env_wins_over_file_when_cli_unset() {
+        let file = PartialConfig {
+            output: Some("file-out.txt".to_string()),
+            ..empty_partial()
+        };
+        let env = PartialConfig {
+            output: Some("env-out.txt".to_string()),
+            ..empty_partial()
+        };
+        let config = merge_config(file, env, empty_partial());
+        assert_eq!(config.output, PathBuf::from("env-out.txt"));
+    }
+
+    #[test]
+    fn merge_config_cli_wins_over_env() {
+        let env = PartialConfig {
+            output: Some("env-out.txt".to_string()),
+            ..empty_partial()
+        };
+        let cli = PartialConfig {
+            output: Some("cli-out.txt".to_string()),
+            ..empty_partial()
+        };
+        let config = merge_config(empty_partial(), env, cli);
+        assert_eq!(config.output, PathBuf::from("cli-out.txt"));
+    }
+
+    #[test]
     fn merge_config_all_defaults_when_nothing_set() {
-        let config = merge_config(empty_partial(), empty_partial());
+        let config = merge_config(empty_partial(), empty_partial(), empty_partial());
         assert_eq!(config.directory, PathBuf::from("."));
         assert_eq!(config.output, PathBuf::from("fyai.txt"));
         assert_eq!(config.include_dirs, None);
@@ -442,7 +605,7 @@ mod tests {
             directory: Some("from-cli".to_string()),
             ..empty_partial()
         };
-        let config = merge_config(file, cli);
+        let config = merge_config(file, empty_partial(), cli);
         assert_eq!(config.directory, PathBuf::from("from-cli"));
     }
 
@@ -452,7 +615,7 @@ mod tests {
             directory: Some("from-file".to_string()),
             ..empty_partial()
         };
-        let config = merge_config(file, empty_partial());
+        let config = merge_config(file, empty_partial(), empty_partial());
         assert_eq!(config.directory, PathBuf::from("from-file"));
     }
 
@@ -466,7 +629,7 @@ mod tests {
             output: Some("cli-out.txt".to_string()),
             ..empty_partial()
         };
-        let config = merge_config(file, cli);
+        let config = merge_config(file, empty_partial(), cli);
         assert_eq!(config.output, PathBuf::from("cli-out.txt"));
     }
 
@@ -476,7 +639,7 @@ mod tests {
             output: Some("file-out.txt".to_string()),
             ..empty_partial()
         };
-        let config = merge_config(file, empty_partial());
+        let config = merge_config(file, empty_partial(), empty_partial());
         assert_eq!(config.output, PathBuf::from("file-out.txt"));
     }
 
@@ -492,7 +655,7 @@ mod tests {
                     $field: Some($default),
                     ..empty_partial()
                 };
-                let config = merge_config(file, cli);
+                let config = merge_config(file, empty_partial(), cli);
                 assert_eq!(config.$field, $default);
             }
 
@@ -502,13 +665,13 @@ mod tests {
                     $field: Some(!$default),
                     ..empty_partial()
                 };
-                let config = merge_config(file, empty_partial());
+                let config = merge_config(file, empty_partial(), empty_partial());
                 assert_eq!(config.$field, !$default);
             }
 
             #[test]
             fn $default_test() {
-                let config = merge_config(empty_partial(), empty_partial());
+                let config = merge_config(empty_partial(), empty_partial(), empty_partial());
                 assert_eq!(config.$field, $default);
             }
         };
@@ -576,7 +739,7 @@ mod tests {
                     $field: Some(vec!["cli-value".to_string()]),
                     ..empty_partial()
                 };
-                let config = merge_config(file, cli);
+                let config = merge_config(file, empty_partial(), cli);
                 assert_eq!(config.$field, Some(vec!["cli-value".to_string()]));
             }
 
@@ -586,13 +749,13 @@ mod tests {
                     $field: Some(vec!["file-value".to_string()]),
                     ..empty_partial()
                 };
-                let config = merge_config(file, empty_partial());
+                let config = merge_config(file, empty_partial(), empty_partial());
                 assert_eq!(config.$field, Some(vec!["file-value".to_string()]));
             }
 
             #[test]
             fn $default_test() {
-                let config = merge_config(empty_partial(), empty_partial());
+                let config = merge_config(empty_partial(), empty_partial(), empty_partial());
                 assert_eq!(config.$field, None);
             }
         };
@@ -647,7 +810,7 @@ mod tests {
                     $field: Some(200),
                     ..empty_partial()
                 };
-                let config = merge_config(file, cli);
+                let config = merge_config(file, empty_partial(), cli);
                 assert_eq!(config.$field, Some(200));
             }
 
@@ -657,13 +820,13 @@ mod tests {
                     $field: Some(100),
                     ..empty_partial()
                 };
-                let config = merge_config(file, empty_partial());
+                let config = merge_config(file, empty_partial(), empty_partial());
                 assert_eq!(config.$field, Some(100));
             }
 
             #[test]
             fn $default_test() {
-                let config = merge_config(empty_partial(), empty_partial());
+                let config = merge_config(empty_partial(), empty_partial(), empty_partial());
                 assert_eq!(config.$field, None);
             }
         };

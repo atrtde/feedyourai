@@ -2,8 +2,13 @@
 //! alias. Included by both `main.rs` files via `#[path]`, so this same
 //! source compiles twice, once per binary target.
 
-use clap::{CommandFactory, FromArgMatches};
-use color_eyre::eyre::{Result, WrapErr};
+use std::io::{IsTerminal, Write};
+use std::time::Duration;
+
+use clap::{ColorChoice, CommandFactory, FromArgMatches};
+use color_eyre::eyre::{Result, WrapErr, eyre};
+use colored::Colorize;
+use indicatif::ProgressBar;
 
 use self::commands::Cli;
 use feedyourai::{config, run_git, run_local};
@@ -13,11 +18,63 @@ mod clipboard;
 /// Argument parsing and the `init` subcommand.
 mod commands;
 
-/// Runs the CLI end to end: installs `color_eyre`'s error/panic hooks, then
-/// parses the real process arguments and delegates to [`execute`].
+/// Runs the CLI end to end: installs the Ctrl-C and `color_eyre`
+/// error/panic hooks, then parses the real process arguments and delegates
+/// to [`execute`].
 pub(crate) fn run() -> Result<()> {
-    color_eyre::install()?;
-    execute(std::env::args_os())
+    install_interrupt_handler();
+    let args: Vec<_> = std::env::args_os().collect();
+    let no_color = color_disabled(&args);
+    colored::control::set_override(!no_color);
+    install_error_hooks(no_color)?;
+    execute(args)
+}
+
+/// Installs a Ctrl-C handler that cleans up an in-progress `--repo` clone's
+/// temporary directory before exiting. A signal handler drives the process
+/// out through `std::process::exit` rather than a normal `return`, so
+/// `TempDir`'s own `Drop`-based cleanup never runs on interrupt without
+/// this.
+///
+/// A failure to install (e.g. a handler already registered) is ignored:
+/// the process still exits promptly on Ctrl-C via the platform default, it
+/// just won't clean up a partial clone.
+fn install_interrupt_handler() {
+    let _ = ctrlc::set_handler(|| {
+        eprintln!("\n{}", "Interrupted. Cleaning up and exiting...".yellow());
+        feedyourai::runner::cleanup_active_clone();
+        std::process::exit(130);
+    });
+}
+
+/// Whether colored output (both `color_eyre`'s error/panic formatting, which
+/// writes to stderr, and this binary's own status lines via the `colored`
+/// crate, which write to both stdout and stderr) should be disabled: an
+/// explicit `--no-color` flag, the `NO_COLOR` convention
+/// (<https://no-color.org/>), a `dumb` terminal that can't render ANSI
+/// escapes, or neither stdout nor stderr being a real terminal (e.g. both
+/// piped/redirected). Checking both streams, rather than stdout alone, means
+/// redirecting just one of them (e.g. `fyai -o out.txt > run.log` with
+/// stderr still attached to a terminal) doesn't strip color from the other.
+///
+/// Checked against the raw argument list rather than the parsed [`Cli`],
+/// since the decision has to be made before `color_eyre`'s hooks are
+/// installed — before any error could be reported through them.
+fn color_disabled<T: AsRef<std::ffi::OsStr>>(args: &[T]) -> bool {
+    args.iter().any(|a| a.as_ref() == "--no-color")
+        || std::env::var_os("NO_COLOR").is_some()
+        || std::env::var("TERM").is_ok_and(|term| term == "dumb")
+        || (!std::io::stdout().is_terminal() && !std::io::stderr().is_terminal())
+}
+
+/// Installs `color_eyre`'s panic/error hooks, with an uncolored theme when
+/// `no_color` is set.
+fn install_error_hooks(no_color: bool) -> Result<()> {
+    let mut builder = color_eyre::config::HookBuilder::default();
+    if no_color {
+        builder = builder.theme(color_eyre::config::Theme::new());
+    }
+    builder.install()
 }
 
 /// Parses `args`, resolves configuration (merging any `fyai.toml` with CLI
@@ -32,8 +89,26 @@ where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
-    let matches = Cli::command().get_matches_from(args);
+    let args: Vec<std::ffi::OsString> = args.into_iter().map(Into::into).collect();
+
+    // clap's own automatic colorization (used for its `--help`/usage/error
+    // text) already honors `NO_COLOR`/`TERM=dumb`/non-terminal output on its
+    // own, but has no way to know about this binary's own `--no-color` flag
+    // unless told explicitly.
+    let mut command = Cli::command();
+    if args.iter().any(|a| a.to_str() == Some("--no-color")) {
+        command = command.color(ColorChoice::Never);
+    }
+    let matches = command.get_matches_from(args);
     let cli = Cli::from_arg_matches(&matches).wrap_err("failed to parse arguments")?;
+
+    if commands::man::handle_man_subcommand(&cli)? {
+        return Ok(());
+    }
+
+    if commands::completions::handle_completions_subcommand(&cli)? {
+        return Ok(());
+    }
 
     if commands::init::handle_init_subcommand(&cli)? {
         return Ok(());
@@ -48,14 +123,20 @@ where
     let file_config = match config::discover_config_file() {
         Some(path) => match config::PartialConfig::from_path(&path) {
             Ok(cfg) => {
-                println!("Loaded config from: {}", path.display());
+                if !cli.quiet && !cli.json {
+                    println!("Loaded config from: {}", path.display());
+                }
                 cfg
             }
             Err(e) => {
                 eprintln!(
-                    "Warning: Failed to load config file ({}): {}",
-                    path.display(),
-                    e
+                    "{}",
+                    format!(
+                        "Warning: Failed to load config file ({}): {}",
+                        path.display(),
+                        e
+                    )
+                    .yellow()
                 );
                 config::PartialConfig::default()
             }
@@ -63,9 +144,51 @@ where
         None => config::PartialConfig::default(),
     };
 
-    let config = config::merge_config(file_config, cli_config);
+    let config = config::merge_config(file_config, config::env_config(), cli_config);
     let output_path = config.output.clone();
     let tree_only = config.tree_only;
+
+    if output_path.exists() && !cli.force {
+        if std::io::stdin().is_terminal() {
+            eprint!(
+                "{}",
+                format!(
+                    "Output file {} already exists. Overwrite? [y/N] ",
+                    output_path.display()
+                )
+                .yellow()
+            );
+            std::io::stderr().flush().ok();
+            let mut answer = String::new();
+            std::io::stdin().read_line(&mut answer)?;
+            if !answer.trim().eq_ignore_ascii_case("y") {
+                if !cli.quiet {
+                    println!(
+                        "{}",
+                        format!("Aborted: not overwriting {}.", output_path.display()).yellow()
+                    );
+                }
+                return Ok(());
+            }
+        } else {
+            return Err(eyre!(
+                "output file {} already exists; pass --force/-f to overwrite in non-interactive mode",
+                output_path.display()
+            ));
+        }
+    }
+
+    let show_progress = !cli.quiet && !cli.json && std::io::stdout().is_terminal();
+    let _spinner = show_progress.then(|| {
+        let pb = ProgressBar::new_spinner();
+        pb.enable_steady_tick(Duration::from_millis(100));
+        pb.set_message(if repo_url.is_some() {
+            "Cloning repository..."
+        } else {
+            "Scanning directory..."
+        });
+        SpinnerGuard(pb)
+    });
 
     let stats = if let Some(repo_url) = repo_url {
         run_git(
@@ -80,37 +203,111 @@ where
     };
 
     if tree_only {
-        println!("Project tree written to {}", output_path.display());
-        println!("Total size walked: {}", format_size(stats.total_size));
+        if cli.json {
+            let summary = RunSummary {
+                output: output_path.display().to_string(),
+                tree_only: true,
+                total_size: stats.total_size,
+                written_size: None,
+                binary_size: None,
+                size_filtered: None,
+                clipboard: None,
+            };
+            println!(
+                "{}",
+                serde_json::to_string(&summary).wrap_err("failed to serialize JSON summary")?
+            );
+        } else if !cli.quiet {
+            println!(
+                "{}",
+                format!("Project tree written to {}", output_path.display()).green()
+            );
+            println!("Total size walked: {}", format_size(stats.total_size));
+        }
         return Ok(());
     }
 
     let output_contents = std::fs::read_to_string(&output_path)
         .wrap_err_with(|| format!("failed to read output file {}", output_path.display()))?;
 
-    println!("Files combined successfully into {}", output_path.display());
-    println!("Total size walked: {}", format_size(stats.total_size));
-    println!(
-        "  Non-binary (written): {}",
-        format_size(stats.written_size)
-    );
-    println!("  Binary (skipped): {}", format_size(stats.binary_size));
     let size_filtered = stats.size_filtered();
-    if size_filtered > 0 {
-        println!("  Skipped by size filter: {}", format_size(size_filtered));
-    }
 
-    if cli.clipboard {
+    // A clipboard failure that's expected in this environment (CI, headless
+    // Linux) is downgraded to a stderr warning, always shown regardless of
+    // `--quiet`/`--json`, rather than aborting the run.
+    let clipboard_copied = if cli.clipboard {
         match clipboard::copy_to_clipboard(&output_contents) {
-            Ok(()) => println!("Output copied to clipboard successfully!"),
+            Ok(()) => Some(true),
             Err(err) if clipboard::should_ignore_clipboard_error() => {
-                eprintln!("Warning: clipboard unavailable; skipping copy. {}", err);
+                eprintln!(
+                    "{}",
+                    format!("Warning: clipboard unavailable; skipping copy. {}", err).yellow()
+                );
+                Some(false)
             }
             Err(err) => return Err(err),
+        }
+    } else {
+        None
+    };
+
+    if cli.json {
+        let summary = RunSummary {
+            output: output_path.display().to_string(),
+            tree_only: false,
+            total_size: stats.total_size,
+            written_size: Some(stats.written_size),
+            binary_size: Some(stats.binary_size),
+            size_filtered: Some(size_filtered),
+            clipboard: clipboard_copied,
+        };
+        println!(
+            "{}",
+            serde_json::to_string(&summary).wrap_err("failed to serialize JSON summary")?
+        );
+    } else if !cli.quiet {
+        println!(
+            "{}",
+            format!("Files combined successfully into {}", output_path.display()).green()
+        );
+        println!("Total size walked: {}", format_size(stats.total_size));
+        println!(
+            "  Non-binary (written): {}",
+            format_size(stats.written_size)
+        );
+        println!("  Binary (skipped): {}", format_size(stats.binary_size));
+        if size_filtered > 0 {
+            println!("  Skipped by size filter: {}", format_size(size_filtered));
+        }
+        if clipboard_copied == Some(true) {
+            println!("{}", "Output copied to clipboard successfully!".green());
         }
     }
 
     Ok(())
+}
+
+/// Clears its spinner on drop, so it disappears whether the run it's
+/// tracking succeeds or bails out early through `?`.
+struct SpinnerGuard(ProgressBar);
+
+impl Drop for SpinnerGuard {
+    fn drop(&mut self) {
+        self.0.finish_and_clear();
+    }
+}
+
+/// A single-line JSON run summary, printed to stdout when `--json` is
+/// passed instead of the human-readable status lines.
+#[derive(serde::Serialize)]
+struct RunSummary {
+    output: String,
+    tree_only: bool,
+    total_size: u64,
+    written_size: Option<u64>,
+    binary_size: Option<u64>,
+    size_filtered: Option<u64>,
+    clipboard: Option<bool>,
 }
 
 /// Formats `bytes` as a human-readable size (`"512 B"`, `"1.2 KB"`, `"3.4

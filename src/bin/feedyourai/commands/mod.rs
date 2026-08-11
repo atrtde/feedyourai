@@ -5,17 +5,22 @@
 use clap::{ArgAction, Parser, Subcommand, parser::ValueSource};
 
 use color_eyre::eyre::{Result, eyre};
-use feedyourai::config::PartialConfig;
+use feedyourai::config::{PartialConfig, parse_comma_list};
 
+/// The `completions` subcommand: prints a shell completion script.
+pub mod completions;
 /// The `init` subcommand: writes a starter `fyai.toml`.
 pub mod init;
+/// The `man` subcommand: prints a roff-formatted man page.
+pub mod man;
 
 /// Top-level command-line arguments.
 #[derive(Parser, Debug)]
 #[command(
     name = "fyai",
     version = env!("CARGO_PKG_VERSION"),
-    about = "A tool to combine text files for LLM processing with flexible filtering options.\n\nCONFIG FILE SUPPORT:\n  - You can specify options in a config file (TOML format).\n  - Local config: ./fyai.toml (used if present in current directory)\n  - Global config: system config directory (used if no local config found).\n    Honors $XDG_CONFIG_HOME (any platform, if set to an absolute path),\n    else the platform default. Run `fyai init --global` to see the exact path.\n  - CLI options override config file values.\n  - You can also drop a .fyaiignore file (gitignore syntax) to exclude paths.\n  - See README for details and examples."
+    about = "A tool to combine text files for LLM processing with flexible filtering options.\n\n\x1b[1m\x1b[4mExample:\x1b[0m\n  fyai -i ./src --include-ext rs,toml -o combined.txt\n\nRun `fyai --help` for the full flag reference, config precedence, and more examples.",
+    long_about = "A tool to combine text files for LLM processing with flexible filtering options.\n\n\x1b[1m\x1b[4mExamples:\x1b[0m\n  fyai -i ./src --include-ext rs,toml -o combined.txt\n  fyai --repo https://github.com/owner/repo.git --tree-only\n  fyai --json -q -o out.txt\n  fyai init\n  fyai man > /usr/local/share/man/man1/fyai.1\n  fyai completions zsh > /usr/local/share/zsh/site-functions/_fyai\n\n\x1b[1m\x1b[4mConfig file support:\x1b[0m\n  - You can specify options in a config file (TOML format).\n  - Local config: ./fyai.toml (used if present in current directory)\n  - Global config: system config directory (used if no local config found).\n  - Precedence: CLI flags > FYAI_* environment variables > config file > built-in defaults."
 )]
 pub struct Cli {
     /// Sets the input directory.
@@ -198,7 +203,48 @@ pub struct Cli {
     #[arg(short = 't', long = "test", action = ArgAction::SetTrue, help = "Run in test mode")]
     pub test: bool,
 
-    /// Optional subcommand (currently only `init`).
+    /// Suppresses non-essential status output (config-loaded notice, size
+    /// breakdown, success messages) \[default: false\]. Errors and warnings
+    /// still print to stderr.
+    #[arg(
+        short = 'q',
+        long = "quiet",
+        action = ArgAction::SetTrue,
+        help = "Suppress non-essential status output [default: false]"
+    )]
+    pub quiet: bool,
+
+    /// Prints the run summary as a single line of JSON to stdout instead of
+    /// human-readable text \[default: false\]. Implies the same output
+    /// suppression as `--quiet` for the human-readable lines.
+    #[arg(
+        long = "json",
+        action = ArgAction::SetTrue,
+        help = "Print the run summary as JSON instead of human-readable text [default: false]"
+    )]
+    pub json: bool,
+
+    /// Disables colored error/panic output \[default: false\]. Also honored
+    /// via the `NO_COLOR` environment variable or `TERM=dumb`.
+    #[arg(
+        long = "no-color",
+        action = ArgAction::SetTrue,
+        help = "Disable colored error/panic output [default: false] (also honors NO_COLOR, TERM=dumb)"
+    )]
+    pub no_color: bool,
+
+    /// Overwrites an existing output file without prompting \[default:
+    /// false\]. Required when stdin isn't a terminal, since there's no one
+    /// to prompt.
+    #[arg(
+        short = 'f',
+        long = "force",
+        action = ArgAction::SetTrue,
+        help = "Overwrite an existing output file without prompting [default: false]"
+    )]
+    pub force: bool,
+
+    /// Optional subcommand (currently `init` and `man`).
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -221,6 +267,20 @@ pub enum Command {
         #[arg(long = "force", action = ArgAction::SetTrue, help = "Overwrite existing config file if present")]
         force: bool,
     },
+
+    /// Prints a roff-formatted man page to stdout.
+    ///
+    /// e.g. `fyai man > /usr/local/share/man/man1/fyai.1`
+    Man,
+
+    /// Prints a shell completion script to stdout.
+    ///
+    /// e.g. `fyai completions zsh > "${fpath[1]}/_fyai"`
+    Completions {
+        /// Shell to generate the completion script for.
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 /// Converts parsed `clap` matches into a [`PartialConfig`], leaving a field
@@ -236,67 +296,41 @@ pub fn config_from_matches(matches: clap::ArgMatches) -> Result<PartialConfig> {
     let directory = explicit_string(&matches, "input");
     let output = explicit_string(&matches, "output");
 
-    let include_dirs = match matches.try_get_one::<String>("include_dirs") {
-        Ok(opt) => opt.map(|dirs| {
-            dirs.split(',')
-                .map(|s| s.trim().to_lowercase())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-        }),
-        Err(_) => None,
-    };
+    let include_dirs = matches
+        .try_get_one::<String>("include_dirs")
+        .ok()
+        .flatten()
+        .map(|dirs| parse_comma_list(dirs));
 
-    let exclude_dirs = match matches.try_get_one::<String>("exclude_dirs") {
-        Ok(opt) => opt.map(|dirs| {
-            dirs.split(',')
-                .map(|s| s.trim().to_lowercase())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-        }),
-        Err(_) => None,
-    };
+    let exclude_dirs = matches
+        .try_get_one::<String>("exclude_dirs")
+        .ok()
+        .flatten()
+        .map(|dirs| parse_comma_list(dirs));
 
-    let include_ext = match matches.try_get_one::<String>("include_ext") {
-        Ok(opt) => opt.map(|ext| {
-            ext.split(',')
-                .map(|s| s.trim().to_lowercase())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-        }),
-        Err(_) => None,
-    };
+    let include_ext = matches
+        .try_get_one::<String>("include_ext")
+        .ok()
+        .flatten()
+        .map(|ext| parse_comma_list(ext));
 
-    let exclude_ext = match matches.try_get_one::<String>("exclude_ext") {
-        Ok(opt) => opt.map(|ext| {
-            ext.split(',')
-                .map(|s| s.trim().to_lowercase())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-        }),
-        Err(_) => None,
-    };
+    let exclude_ext = matches
+        .try_get_one::<String>("exclude_ext")
+        .ok()
+        .flatten()
+        .map(|ext| parse_comma_list(ext));
 
-    let include_files = match matches.try_get_one::<String>("include_files") {
-        Ok(opt) => opt.map(|files| {
-            files
-                .split(',')
-                .map(|s| s.trim().to_lowercase())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-        }),
-        Err(_) => None,
-    };
+    let include_files = matches
+        .try_get_one::<String>("include_files")
+        .ok()
+        .flatten()
+        .map(|files| parse_comma_list(files));
 
-    let exclude_files = match matches.try_get_one::<String>("exclude_files") {
-        Ok(opt) => opt.map(|files| {
-            files
-                .split(',')
-                .map(|s| s.trim().to_lowercase())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-        }),
-        Err(_) => None,
-    };
+    let exclude_files = matches
+        .try_get_one::<String>("exclude_files")
+        .ok()
+        .flatten()
+        .map(|files| parse_comma_list(files));
 
     let min_size = match matches.try_get_one::<u64>("min_size") {
         Ok(Some(value)) => Some(*value),

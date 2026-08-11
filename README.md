@@ -43,13 +43,39 @@ You can specify options in a config file (TOML format):
 
 - **Local config:** `./fyai.toml` (used if present in current directory)
 - **Global config:** System config directory, used if no local config found — `$XDG_CONFIG_HOME` if set to an absolute path (any platform), otherwise the platform default (e.g. `~/.config` on Linux, `~/Library/Application Support` on macOS)
-- **Precedence:** Local config overrides global config. CLI options override both config files.
+- **Precedence:** CLI flags > `FYAI_*` environment variables > local config > global config > built-in defaults.
 
 To see the exact global config path on your system, run:
 
 ```bash
 fyai init --global
 ```
+
+### Environment Variables
+
+Every config option can also be set via a `FYAI_*` environment variable, taking precedence over `fyai.toml` but not over CLI flags:
+
+| Variable | Corresponds to |
+| --- | --- |
+| `FYAI_DIRECTORY` | `-i`/`--input` |
+| `FYAI_OUTPUT` | `-o`/`--output` |
+| `FYAI_INCLUDE_DIRS` | `--include-dirs` |
+| `FYAI_EXCLUDE_DIRS` | `--exclude-dirs` |
+| `FYAI_INCLUDE_EXT` | `--include-ext` |
+| `FYAI_EXCLUDE_EXT` | `--exclude-ext` |
+| `FYAI_INCLUDE_FILES` | `--include-files` |
+| `FYAI_EXCLUDE_FILES` | `--exclude-files` |
+| `FYAI_MIN_SIZE` | `-n`/`--min-size` |
+| `FYAI_MAX_SIZE` | `-m`/`--max-size` |
+| `FYAI_HIDDEN` | `--no-hidden` (inverse; `true`/`false`) |
+| `FYAI_GITIGNORE` | `--no-gitignore` (inverse; `true`/`false`) |
+| `FYAI_IGNORE_FILES` | `--no-ignore-files` (inverse; `true`/`false`) |
+| `FYAI_GIT_GLOBAL` | `--no-git-global` (inverse; `true`/`false`) |
+| `FYAI_FOLLOW_LINKS` | `--follow-links` (`true`/`false`) |
+| `FYAI_TREE_ONLY` | `--tree-only` (`true`/`false`) |
+| `FYAI_HUMAN` | `--human` (`true`/`false`) |
+
+List-valued variables use the same comma-separated format as their CLI counterparts (e.g. `FYAI_INCLUDE_EXT=rs,toml`).
 
 #### Example `fyai.toml`
 
@@ -80,8 +106,11 @@ Drop a `.fyaiignore` file (gitignore syntax) anywhere under the scanned director
 ### Basic Usage
 
 ```bash
-fyai            # combine everything in the current directory into fyai.txt
-fyai --help     # show all options
+fyai                                                                # combine everything in the current directory into fyai.txt
+fyai --help                                                         # show all options
+
+fyai man > /usr/local/share/man/man1/fyai.1                        # print a roff-formatted man page to a file
+fyai completions zsh > /usr/local/share/zsh/site-functions/_fyai   # print a zsh completion script to a file
 ```
 
 ### Examples
@@ -102,6 +131,11 @@ fyai --help     # show all options
 | Remote repo, specific branch             | `fyai --repo https://github.com/owner/repo.git --repo-branch main`    |
 | Remote repo, specific commit             | `fyai --repo https://github.com/owner/repo.git --repo-commit 1234abcd` |
 | Generate a config template               | `fyai init`                                                            |
+| Suppress status output                   | `fyai -q`                                                              |
+| Machine-readable run summary             | `fyai --json`                                                         |
+| Disable colored error output             | `fyai --no-color`                                                     |
+| Overwrite an existing output without prompting | `fyai -o out.txt --force`                                       |
+| Print a roff man page                    | `fyai man > /usr/local/share/man/man1/fyai.1`                         |
 
 ## Output Format
 

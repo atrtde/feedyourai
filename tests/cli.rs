@@ -46,6 +46,167 @@ fn combines_files_and_writes_output() {
 }
 
 #[test]
+fn quiet_suppresses_status_output() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("a.txt"), "hello").unwrap();
+    let output = dir.path().join("out.txt");
+
+    fyai()
+        .arg("-i")
+        .arg(dir.path())
+        .arg("-o")
+        .arg(&output)
+        .arg("-q")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+
+    assert!(output.exists());
+}
+
+#[test]
+fn json_flag_prints_single_line_json_summary() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("a.txt"), "hello").unwrap();
+    let output = dir.path().join("out.txt");
+
+    let assert = fyai()
+        .arg("-i")
+        .arg(dir.path())
+        .arg("-o")
+        .arg(&output)
+        .arg("--json")
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).to_string();
+    let lines: Vec<&str> = stdout.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert_eq!(
+        lines.len(),
+        1,
+        "expected exactly one JSON line, got: {stdout:?}"
+    );
+
+    let json: serde_json::Value = serde_json::from_str(lines[0]).expect("valid JSON");
+    assert_eq!(json["tree_only"], false);
+    assert_eq!(json["total_size"], 5);
+    assert_eq!(json["written_size"], 5);
+}
+
+#[test]
+fn no_color_flag_disables_ansi_in_error_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("does-not-exist");
+    let output = dir.path().join("out.txt");
+
+    let assert = fyai()
+        .arg("-i")
+        .arg(&missing)
+        .arg("-o")
+        .arg(&output)
+        .arg("--no-color")
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    assert!(
+        !stderr.contains('\u{1b}'),
+        "expected no ANSI escapes in stderr, got: {stderr:?}"
+    );
+}
+
+#[test]
+fn no_color_env_var_disables_ansi_in_error_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("does-not-exist");
+    let output = dir.path().join("out.txt");
+
+    let assert = fyai()
+        .arg("-i")
+        .arg(&missing)
+        .arg("-o")
+        .arg(&output)
+        .env("NO_COLOR", "1")
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    assert!(
+        !stderr.contains('\u{1b}'),
+        "expected no ANSI escapes in stderr, got: {stderr:?}"
+    );
+}
+
+#[test]
+fn existing_output_without_force_fails_noninteractively() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("a.txt"), "hello").unwrap();
+    let output = dir.path().join("out.txt");
+    fs::write(&output, "old contents").unwrap();
+
+    fyai()
+        .arg("-i")
+        .arg(dir.path())
+        .arg("-o")
+        .arg(&output)
+        // A piped, empty stdin is never a terminal, exercising the same
+        // "no one to prompt" path as a real non-interactive script.
+        .write_stdin("")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("already exists"))
+        .stderr(predicate::str::contains("--force"));
+
+    assert_eq!(fs::read_to_string(&output).unwrap(), "old contents");
+}
+
+#[test]
+fn force_flag_overwrites_existing_output_without_prompting() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("a.txt"), "hello").unwrap();
+    let output = dir.path().join("out.txt");
+    fs::write(&output, "old contents").unwrap();
+
+    fyai()
+        .arg("-i")
+        .arg(dir.path())
+        .arg("-o")
+        .arg(&output)
+        .arg("--force")
+        .assert()
+        .success();
+
+    let contents = fs::read_to_string(&output).unwrap();
+    assert!(contents.contains("hello"));
+    assert!(!contents.contains("old contents"));
+}
+
+#[test]
+fn man_subcommand_prints_roff_man_page() {
+    fyai()
+        .arg("man")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(".TH fyai 1"))
+        .stdout(predicate::str::contains(".SH NAME"));
+}
+
+#[test]
+fn completions_subcommand_prints_shell_script() {
+    fyai()
+        .args(["completions", "zsh"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("#compdef fyai"));
+
+    fyai()
+        .args(["completions", "bash"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("_fyai()"));
+}
+
+#[test]
 fn tree_only_skips_file_contents() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("secret.txt"), "top-secret-body").unwrap();
